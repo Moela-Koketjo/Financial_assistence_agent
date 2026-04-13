@@ -1,0 +1,27 @@
+# Secrets and environment variables
+.env
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Project-specific data/logs (prevents leaking your bank statements)
+*.pdf
+*.csv
+*.log
+
+# Vector DB local storage
+data/weaviate/
+
+# Claude/Agent metadata
+.claude/
+#claude spec
+*.md
+SPEC.md
+CLAUDE.md
