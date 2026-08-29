@@ -18,36 +18,42 @@ _CATEGORIES = [
     {"name": "Other",             "type": "expense",  "color_hex": "#888780"},
 ]
 
+# (keyword, category, priority) — HIGHER PRIORITY WINS when several keywords
+# match one description. "PREPAID ELECTRICITY TSHWANE" contains both PREPAID
+# (Airtime & Data) and ELECTRICITY (Utilities); without priorities the winner
+# depended on row order, so the same statement could categorise differently on
+# different machines. Specific services outrank brands, which outrank generic
+# payment words like FEE and PREPAID.
 _KEYWORDS = [
-    ("CHECKERS",     "Groceries"),
-    ("PNP",          "Groceries"),
-    ("WOOLWORTHS",   "Groceries"),
-    ("SPAR",         "Groceries"),
-    ("CLICKS",       "Groceries"),
-    ("SHOPRITE",     "Groceries"),
-    ("AIRTIME",      "Airtime & Data"),
-    ("PREPAID",      "Airtime & Data"),
-    ("MTN",          "Airtime & Data"),
-    ("VODACOM",      "Airtime & Data"),
-    ("TELKOM",       "Airtime & Data"),
-    ("OTT",          "Airtime & Data"),
-    ("SMART-AP",     "Airtime & Data"),
-    ("RESTAURANT",   "Food & Takeout"),
-    ("KFC",          "Food & Takeout"),
-    ("STEERS",       "Food & Takeout"),
-    ("NANDOS",       "Food & Takeout"),
-    ("UBEREATS",     "Food & Takeout"),
-    ("MR D",         "Food & Takeout"),
-    ("BOLT",         "Transport"),
-    ("UBER",         "Transport"),
-    ("FEE",          "Bank Fees"),
-    ("BUNDLE",       "Bank Fees"),
-    ("CHARGE",       "Bank Fees"),
-    ("ELECTRICITY",  "Utilities"),
-    ("WATER",        "Utilities"),
-    ("SEND",         "Personal Transfer"),
-    ("EFT",          "Personal Transfer"),
-    ("TAKEALOT",     "Shopping"),
+    ("CHECKERS",     "Groceries",          50),
+    ("PNP",          "Groceries",          50),
+    ("WOOLWORTHS",   "Groceries",          50),
+    ("SPAR",         "Groceries",          50),
+    ("CLICKS",       "Groceries",          50),
+    ("SHOPRITE",     "Groceries",          50),
+    ("AIRTIME",      "Airtime & Data",     10),
+    ("PREPAID",      "Airtime & Data",     10),
+    ("MTN",          "Airtime & Data",     50),
+    ("VODACOM",      "Airtime & Data",     50),
+    ("TELKOM",       "Airtime & Data",     50),
+    ("OTT",          "Airtime & Data",     50),
+    ("SMART-AP",     "Airtime & Data",     50),
+    ("RESTAURANT",   "Food & Takeout",     10),
+    ("KFC",          "Food & Takeout",     50),
+    ("STEERS",       "Food & Takeout",     50),
+    ("NANDOS",       "Food & Takeout",     50),
+    ("UBEREATS",     "Food & Takeout",     50),
+    ("MR D",         "Food & Takeout",     50),
+    ("BOLT",         "Transport",          50),
+    ("UBER",         "Transport",          50),
+    ("FEE",          "Bank Fees",          0),
+    ("BUNDLE",       "Bank Fees",          0),
+    ("CHARGE",       "Bank Fees",          0),
+    ("ELECTRICITY",  "Utilities",          100),
+    ("WATER",        "Utilities",          100),
+    ("SEND",         "Personal Transfer",  0),
+    ("EFT",          "Personal Transfer",  0),
+    ("TAKEALOT",     "Shopping",           50),
 ]
 
 
@@ -81,17 +87,25 @@ def _seed_categories(db) -> None:
 
 
 def _seed_keywords(db) -> None:
-    """Insert seed keyword rules if the keyword_rule table is empty."""
-    if db.query(KeywordRule).count() > 0:
-        logger.info("Keywords already seeded — skipping")
-        return
+    """Insert seed keyword rules, and re-sync priorities on existing databases."""
     cat_index = {c.name: c.id for c in db.query(Category).all()}
-    rules = [
-        KeywordRule(keyword=kw, category_id=cat_index[cat_name])
-        for kw, cat_name in _KEYWORDS
-    ]
-    db.add_all(rules)
-    logger.info("Inserted %d keyword rules", len(rules))
+    existing = {r.keyword: r for r in db.query(KeywordRule).all()}
+
+    inserted = updated = 0
+    for kw, cat_name, priority in _KEYWORDS:
+        rule = existing.get(kw)
+        if rule is None:
+            db.add(KeywordRule(keyword=kw, category_id=cat_index[cat_name], priority=priority))
+            inserted += 1
+        elif rule.priority != priority:
+            # Priorities are corrective: a database seeded before they existed
+            # has every rule at 0, which is the ambiguity bug. Fix it in place.
+            rule.priority = priority
+            updated += 1
+    if inserted or updated:
+        logger.info("Keyword rules: %d inserted, %d priorities updated", inserted, updated)
+    else:
+        logger.info("Keyword rules already up to date")
 
 
 if __name__ == "__main__":

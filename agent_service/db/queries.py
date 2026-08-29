@@ -140,7 +140,15 @@ def get_keywords(db: Session) -> list[dict]:
     rows = (
         db.query(KeywordRule, Category)
         .join(Category, KeywordRule.category_id == Category.id)
-        .order_by(KeywordRule.priority.desc())
+        # Deterministic order: priority first, then longer keywords (more
+        # specific), then id. Without the tiebreakers, equal-priority rules
+        # came back in database order and the same statement could categorise
+        # differently on different machines.
+        .order_by(
+            KeywordRule.priority.desc(),
+            func.length(KeywordRule.keyword).desc(),
+            KeywordRule.id,
+        )
         .all()
     )
     return [
