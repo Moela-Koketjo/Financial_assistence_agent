@@ -11,17 +11,10 @@ __pycache__/
 venv/
 env/
 
-# Project-specific data/logs (prevents leaking your bank statements)
+# Personal financial data — never commit real bank statements
 *.pdf
 *.csv
 *.log
 
-# Vector DB local storage
-data/weaviate/
-
-# Claude/Agent metadata
-.claude/
-#claude spec
-*.md
-SPEC.md
-CLAUDE.md
+# ...except the synthetic demo statements, which contain no real data
+!samples/sample_statement*.pdf

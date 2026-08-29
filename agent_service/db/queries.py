@@ -16,6 +16,15 @@ from db.models import (
 
 logger = logging.getLogger(__name__)
 
+# All amounts in this app are South African Rand. Tool results carry a
+# preformatted *_display string so the LLM never has to guess a currency.
+CURRENCY_SYMBOL = "R"
+
+
+def money(value: float | None) -> str:
+    """Format a numeric amount as a Rand display string, e.g. R1,234.56."""
+    return f"{CURRENCY_SYMBOL}{(value or 0.0):,.2f}"
+
 
 # ---------------------------------------------------------------------------
 # Insert helpers
@@ -62,7 +71,7 @@ def insert_transaction(db: Session, statement_id: int, tx_dict: dict) -> dict:
     tx = Transaction(
         statement_id=statement_id,
         transaction_date=iso_date,
-        raw_description=tx_dict.get("description", ""),
+        raw_description=tx_dict.get("raw_description") or tx_dict.get("description", ""),
         service_fee=tx_dict.get("service_fee", 0.0),
         amount=tx_dict.get("amount", 0.0),
         direction=tx_dict.get("direction", "DR"),
@@ -171,14 +180,24 @@ def get_spending_by_category(db: Session, category: str, month: int, year: int) 
         .first()
     )
     if not row:
-        return {"category": category, "month": month, "year": year, "total_spent": 0.0, "transaction_count": 0, "avg_transaction": 0.0}
+        return {
+            "category": category,
+            "month": month,
+            "year": year,
+            "has_data": False,
+            "note": f"No statement has been imported for {month:02d}/{year}, "
+                    f"so spending for this period is unknown (not zero).",
+        }
     return {
         "category": category,
         "month": month,
         "year": year,
+        "has_data": True,
         "total_spent": row.total_spent,
+        "total_spent_display": money(row.total_spent),
         "transaction_count": row.transaction_count,
         "avg_transaction": row.avg_transaction,
+        "avg_transaction_display": money(row.avg_transaction),
     }
 
 
@@ -197,6 +216,7 @@ def get_monthly_trend(db: Session, category: str, months: int) -> list[dict]:
             "year": r.statement_year,
             "month": r.statement_month,
             "total_spent": r.total_spent,
+            "total_spent_display": money(r.total_spent),
             "transaction_count": r.transaction_count,
         }
         for r in reversed(rows)
@@ -206,40 +226,69 @@ def get_monthly_trend(db: Session, category: str, months: int) -> list[dict]:
 def compare_months(db: Session, month1: int, month2: int, year: int) -> dict:
     """Return a side-by-side spending breakdown for two months in the same year."""
     def _summary(month: int) -> dict:
+        """Return one month's category breakdown and total."""
         rows = (
             db.query(MonthlySummary, Category)
             .join(Category, MonthlySummary.category_id == Category.id)
             .filter(MonthlySummary.statement_month == month, MonthlySummary.statement_year == year)
             .all()
         )
-        breakdown = [{"category": c.name, "total_spent": s.total_spent} for s, c in rows]
+        breakdown = [
+            {"category": c.name, "total_spent": s.total_spent, "total_spent_display": money(s.total_spent)}
+            for s, c in rows
+        ]
         total = sum(r["total_spent"] for r in breakdown)
-        return {"month": month, "year": year, "total": total, "breakdown": breakdown}
+        return {
+            "month": month, "year": year, "has_data": bool(rows),
+            "total": total, "total_display": money(total), "breakdown": breakdown,
+        }
 
     m1 = _summary(month1)
     m2 = _summary(month2)
-    return {"month1": m1, "month2": m2, "difference": round(m2["total"] - m1["total"], 2)}
+    difference = round(m2["total"] - m1["total"], 2)
+    return {
+        "month1": m1, "month2": m2,
+        "difference": difference, "difference_display": money(difference),
+    }
 
 
-def get_top_merchants(db: Session, month: int, year: int, limit: int = 10) -> list[dict]:
-    """Return the top merchants by total spend for a given month, as a list of dicts."""
+def get_top_merchants(
+    db: Session,
+    month: int,
+    year: int,
+    limit: int = 10,
+    category: Optional[str] = None,
+) -> list[dict]:
+    """Return the top merchants by total spend for a month, optionally within one category."""
     date_prefix = f"{year}-{month:02d}-%"
+    query = db.query(
+        Transaction.raw_description,
+        func.sum(Transaction.amount).label("total"),
+        func.count(Transaction.id).label("count"),
+    ).filter(
+        Transaction.transaction_date.like(date_prefix),
+        Transaction.direction == "DR",
+    )
+    if category:
+        query = query.join(Category, Transaction.category_id == Category.id).filter(
+            Category.name == category
+        )
     rows = (
-        db.query(
-            Transaction.raw_description,
-            func.sum(Transaction.amount).label("total"),
-            func.count(Transaction.id).label("count"),
-        )
-        .filter(
-            Transaction.transaction_date.like(date_prefix),
-            Transaction.direction == "DR",
-        )
+        query
         .group_by(Transaction.raw_description)
         .order_by(func.sum(Transaction.amount).desc())
         .limit(limit)
         .all()
     )
-    return [{"merchant": r.raw_description, "total_spent": r.total, "transaction_count": r.count} for r in rows]
+    return [
+        {
+            "merchant": r.raw_description,
+            "total_spent": r.total,
+            "total_spent_display": money(r.total),
+            "transaction_count": r.count,
+        }
+        for r in rows
+    ]
 
 
 def get_bank_fees(db: Session, year: int) -> list[dict]:
@@ -252,7 +301,8 @@ def get_bank_fees(db: Session, year: int) -> list[dict]:
         .all()
     )
     return [
-        {"month": r.statement_month, "year": r.statement_year, "total_spent": r.total_spent, "transaction_count": r.transaction_count}
+        {"month": r.statement_month, "year": r.statement_year, "total_spent": r.total_spent,
+         "total_spent_display": money(r.total_spent), "transaction_count": r.transaction_count}
         for r in rows
     ]
 
@@ -276,6 +326,7 @@ def get_transfers(db: Session, month: int, year: int) -> list[dict]:
             "date": t.transaction_date,
             "description": t.raw_description,
             "amount": t.amount,
+            "amount_display": money(t.amount),
             "direction": t.direction,
         }
         for t in rows
@@ -300,7 +351,9 @@ def get_income(db: Session, month: int, year: int) -> dict:
         "month": month,
         "year": year,
         "total_income": float(result.total or 0.0),
+        "total_income_display": money(result.total),
         "transaction_count": result.count or 0,
+        "has_data": bool(result.count),
     }
 
 
@@ -322,8 +375,10 @@ def get_summary(db: Session, month: int, year: int) -> list[dict]:
             "type": cat.type,
             "color_hex": cat.color_hex,
             "total_spent": s.total_spent,
+            "total_spent_display": money(s.total_spent),
             "transaction_count": s.transaction_count,
             "avg_transaction": s.avg_transaction,
+            "avg_transaction_display": money(s.avg_transaction),
         }
         for s, cat in rows
     ]
@@ -332,6 +387,24 @@ def get_summary(db: Session, month: int, year: int) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Statement and review queries
 # ---------------------------------------------------------------------------
+
+def get_statement_by_month_year(db: Session, month: int, year: int) -> Optional[dict]:
+    """Return the statement for a given month/year as a dict, or None."""
+    s = (
+        db.query(BankStatement)
+        .filter_by(statement_month=month, statement_year=year)
+        .first()
+    )
+    if not s:
+        return None
+    return {
+        "id": s.id,
+        "bank_name": s.bank_name,
+        "statement_month": s.statement_month,
+        "statement_year": s.statement_year,
+        "imported_at": s.imported_at,
+    }
+
 
 def get_statements_list(db: Session) -> list[dict]:
     """Return all imported bank statements ordered by year and month descending."""
@@ -390,11 +463,31 @@ def confirm_transaction(db: Session, transaction_id: int) -> None:
 
 
 def update_transaction_category(db: Session, transaction_id: int, category_id: int) -> None:
-    """Update a transaction's category and mark it as user-confirmed."""
-    db.query(Transaction).filter_by(id=transaction_id).update(
-        {"category_id": category_id, "categorization_method": "user", "user_confirmed": 1}
-    )
+    """Update a transaction's category, mark it confirmed, and teach merchant memory."""
+    tx = db.query(Transaction).filter_by(id=transaction_id).first()
+    if tx is None:
+        return
+    tx.category_id = category_id
+    tx.categorization_method = "user"
+    tx.user_confirmed = 1
+    if tx.raw_description:
+        insert_merchant(db, raw_name=tx.raw_description, category_id=category_id, match_type="manual")
     db.flush()
+
+
+def get_transaction(db: Session, transaction_id: int) -> Optional[dict]:
+    """Return one transaction as a dict, or None if not found."""
+    t = db.query(Transaction).filter_by(id=transaction_id).first()
+    if not t:
+        return None
+    return {
+        "id": t.id,
+        "date": t.transaction_date,
+        "description": t.raw_description,
+        "amount": t.amount,
+        "direction": t.direction,
+        "category_id": t.category_id,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -403,6 +496,9 @@ def update_transaction_category(db: Session, transaction_id: int, category_id: i
 
 def rebuild_monthly_summary(db: Session, month: int, year: int) -> None:
     """Delete and rebuild monthly_summary rows for the given month and year."""
+    # Delete-then-rebuild rather than incremental updates: a recategorisation
+    # can move spend between categories, and recomputing the month is simpler
+    # and cheaper than reasoning about deltas.
     db.query(MonthlySummary).filter_by(statement_month=month, statement_year=year).delete()
 
     date_prefix = f"{year}-{month:02d}-%"
@@ -416,6 +512,8 @@ def rebuild_monthly_summary(db: Session, month: int, year: int) -> None:
         .filter(
             Transaction.transaction_date.like(date_prefix),
             Transaction.category_id.isnot(None),
+            # DR only — the summary measures SPENDING. Income (CR) would
+            # otherwise inflate category totals and the dashboard's charts.
             Transaction.direction == "DR",
         )
         .group_by(Transaction.category_id)

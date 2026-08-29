@@ -1,31 +1,23 @@
 import json
 import logging
+import re
 
-from google import genai
 from sqlalchemy.orm import Session
 
+from agent.llm import call_with_retry, client
 from agent.prompts import CATEGORIZE_TRANSACTION_PROMPT
 from db.queries import (
     get_categories,
     get_keywords,
     get_merchant_by_name,
     insert_merchant,
-    rebuild_monthly_summary,
 )
 from settings import settings
 
 logger = logging.getLogger(__name__)
 
-client = genai.Client(api_key=settings.GOOGLE_API_KEY)
-
-
-def categorize(
-    db: Session,
-    transactions: list[dict],
-    month: int,
-    year: int,
-) -> list[dict]:
-    """Categorize each transaction and return the enriched list."""
+def categorize(db: Session, transactions: list[dict]) -> list[dict]:
+    """Enrich each transaction dict with categorization fields; caller commits."""
     keywords = get_keywords(db)
     categories = get_categories(db)
     cat_by_name = {c["name"]: c["id"] for c in categories}
@@ -35,10 +27,7 @@ def categorize(
         tx.update(result)
         _save_merchant(db, tx)
 
-    db.commit()
-    rebuild_monthly_summary(db, month, year)
-    db.commit()
-    logger.info("Categorized %d transactions for %d/%d", len(transactions), month, year)
+    logger.info("Categorized %d transactions", len(transactions))
     return transactions
 
 
@@ -57,15 +46,15 @@ def _categorize_one(
         logger.debug("Merchant hit: %s", description)
         return {
             "category_id": merchant["category_id"],
-            "categorization_method": "user",
+            "categorization_method": merchant.get("match_type") or "user",
             "user_confirmed": 1,
             "llm_confidence": None,
         }
 
-    # 2 — keyword match
+    # 2 — keyword match on whole words only (avoids FEE matching COFFEE)
     upper = description.upper()
     for kw in keywords:
-        if kw["keyword"] in upper:
+        if re.search(rf"\b{re.escape(kw['keyword'])}\b", upper):
             logger.debug("Keyword hit '%s': %s", kw["keyword"], description)
             return {
                 "category_id": kw["category_id"],
@@ -100,9 +89,12 @@ def _llm_categorize(
         direction=direction,
     )
     try:
-        response = client.models.generate_content(
-            model=settings.FLASH_MODEL,
-            contents=prompt,
+        response = call_with_retry(
+            lambda: client.models.generate_content(
+                model=settings.CATEGORIZE_MODEL,
+                contents=prompt,
+            ),
+            what="categorize transaction",
         )
         text = (
             response.text
@@ -134,17 +126,20 @@ def _llm_categorize(
 
 
 def _save_merchant(db: Session, tx: dict) -> None:
-    """Persist the categorization result to the merchant memory table."""
+    """Persist confirmed categorizations to merchant memory — never unreviewed guesses."""
+    # Merchant memory is the app's long-term learning: a merchant seen once is
+    # never sent to the LLM again. That only works if what we store is right,
+    # so low-confidence guesses are withheld until a human confirms them.
     description: str = tx.get("raw_description") or tx.get("description", "")
     category_id = tx.get("category_id")
     method: str = tx.get("categorization_method", "llm")
-    if description and category_id:
+    if description and category_id and tx.get("user_confirmed") == 1:
         insert_merchant(db, raw_name=description, category_id=category_id, match_type=method)
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    logger.info("agent.categorizer imported OK — model: %s", settings.FLASH_MODEL)
+    logger.info("agent.categorizer imported OK — model: %s", settings.CATEGORIZE_MODEL)
     logger.info(
         "LLM_CONFIDENCE_THRESHOLD: %s", settings.LLM_CONFIDENCE_THRESHOLD
     )

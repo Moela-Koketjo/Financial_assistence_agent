@@ -90,14 +90,22 @@ class Transaction(Base):
     transaction_date      = Column(String(10), nullable=False)   # YYYY-MM-DD
     raw_description       = Column(Text, nullable=False)
     service_fee           = Column(Float, default=0)
-    amount                = Column(Float, nullable=False)         # always positive
-    direction             = Column(String(2), nullable=False)     # DR | CR
+    # Amount is always POSITIVE; direction carries the sign. Storing signed
+    # amounts would make every SUM() depend on getting the sign right upstream.
+    amount                = Column(Float, nullable=False)
+    direction             = Column(String(2), nullable=False)     # DR = out, CR = in
     balance               = Column(Float)
     category_id           = Column(Integer, ForeignKey("category.id"))
     merchant_id           = Column(Integer, ForeignKey("merchant.id"))
-    categorization_method = Column(String(10))                   # keyword | llm | user
+    # How the category was decided, and how much to trust it:
+    #   keyword -> merchant memory or a keyword rule matched (trusted)
+    #   llm     -> Gemini guessed (trusted only above the confidence threshold)
+    #   user    -> a human corrected it in the review panel (always trusted)
+    categorization_method = Column(String(10))
+    # 0 puts the row in the review queue. Only user_confirmed=1 rows are written
+    # back to merchant memory, so an unreviewed guess never becomes a fact.
     user_confirmed        = Column(Integer, default=0)
-    llm_confidence        = Column(Float)
+    llm_confidence        = Column(Float)   # NULL unless categorization_method="llm"
 
     def __repr__(self) -> str:
         """Show transaction id, date, direction, and amount."""

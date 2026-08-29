@@ -1,22 +1,14 @@
+"""Streamlit dashboard — a thin client over the FastAPI finance agent."""
+
 import logging
+import time
 from datetime import datetime
 
 import streamlit as st
 
-from agent.categorizer import categorize
-from agent.parser import parse
-from db.database import SessionLocal
-from db.queries import (
-    confirm_transaction,
-    get_categories,
-    get_statements_list,
-    get_summary,
-    get_transactions_needing_review,
-    insert_statement,
-    insert_transaction,
-    update_transaction_category,
-)
 from settings import settings
+from ui import api_client
+from ui.api_client import ApiError
 from ui.charts import category_donut, monthly_trend, spend_by_category_bar
 from ui.chat import render
 
@@ -25,31 +17,67 @@ logger = logging.getLogger(__name__)
 st.set_page_config(page_title=settings.APP_NAME, layout="wide")
 
 # ---------------------------------------------------------------------------
-# DB session — cached for the Streamlit app lifetime
-# ---------------------------------------------------------------------------
-
-@st.cache_resource
-def _get_session():
-    """Create a single SQLAlchemy session shared across all Streamlit reruns."""
-    return SessionLocal()
-
-
-db = _get_session()
-
-# ---------------------------------------------------------------------------
 # Session state defaults
 # ---------------------------------------------------------------------------
 
-if "selected_month" not in st.session_state:
-    st.session_state.selected_month = datetime.now().month
-if "selected_year" not in st.session_state:
-    st.session_state.selected_year = datetime.now().year
+def _default_period() -> tuple[int, int]:
+    """Open on the most recent imported statement, falling back to today."""
+    now = datetime.now()
+    try:
+        statements = api_client.list_statements()
+    except ApiError:
+        return now.month, now.year
+    if not statements:
+        return now.month, now.year
+    latest = statements[0]  # API returns newest first
+    return latest["statement_month"], latest["statement_year"]
+
+
+if "selected_month" not in st.session_state or "selected_year" not in st.session_state:
+    default_month, default_year = _default_period()
+    st.session_state.selected_month = default_month
+    st.session_state.selected_year = default_year
+if "processed_upload" not in st.session_state:
+    st.session_state.processed_upload = None
 
 month: int = st.session_state.selected_month
 year: int = st.session_state.selected_year
 
+
+def _submit_import(data: bytes, filename: str) -> dict | None:
+    """Submit a statement and poll the agent until the background import finishes."""
+    try:
+        accepted = api_client.upload_statement(data, filename)
+    except ApiError as exc:
+        st.error(str(exc))
+        return None
+
+    job_id = accepted["job_id"]
+    job = accepted
+    status_box = st.empty()
+    deadline = time.monotonic() + settings.IMPORT_POLL_TIMEOUT
+
+    while job["status"] == "processing" and time.monotonic() < deadline:
+        status_box.caption("Parsing and categorising… this can take up to a minute.")
+        time.sleep(settings.IMPORT_POLL_INTERVAL)
+        try:
+            job = api_client.get_job(job_id)
+        except ApiError as exc:
+            status_box.empty()
+            st.error(str(exc))
+            return None
+
+    status_box.empty()
+    if job["status"] == "done":
+        return job
+    if job["status"] == "failed":
+        st.error(job.get("error") or "The import failed.")
+    else:
+        st.warning("The import is still running — reload the page shortly to see it.")
+    return None
+
 # ---------------------------------------------------------------------------
-# Sidebar
+# Sidebar — upload and statement list
 # ---------------------------------------------------------------------------
 
 with st.sidebar:
@@ -62,41 +90,29 @@ with st.sidebar:
         label_visibility="collapsed",
     )
 
-    if uploaded is not None:
-        with st.spinner("Parsing statement…"):
-            transactions = parse(uploaded)
-
-        if transactions:
-            with st.spinner("Categorizing and saving…"):
-                infer_month = datetime.now().month
-                infer_year = datetime.now().year
-
-                # Normalise key before categorize so raw_description is available
-                for tx in transactions:
-                    tx["raw_description"] = tx.pop("description", tx.get("raw_description", ""))
-
-                # 1 → 2: categorize enriches each dict with category_id etc.
-                transactions = categorize(db, transactions, infer_month, infer_year)
-
-                # 3: create the statement record
-                stmt = insert_statement(db, infer_month, infer_year, "FNB", None, None)
-
-                # 4: persist each enriched transaction
-                for tx in transactions:
-                    insert_transaction(db, stmt["id"], tx)
-
-                # 5: commit everything
-                db.commit()
-
-            st.success(f"Imported {len(transactions)} transactions.")
-            st.rerun()  # 6
-        else:
-            st.error("Could not parse statement. Please try another file.")
+    upload_key = (uploaded.name, uploaded.size) if uploaded is not None else None
+    if uploaded is not None and upload_key != st.session_state.processed_upload:
+        st.session_state.processed_upload = upload_key  # never re-import on rerun
+        job = _submit_import(uploaded.getvalue(), uploaded.name)
+        if job and job["status"] == "done":
+            result = job["result"]
+            st.session_state.selected_month = result["month"]
+            st.session_state.selected_year = result["year"]
+            st.success(
+                f"Imported {result['transaction_count']} transactions "
+                f"for {result['month']:02d}/{result['year']}."
+            )
+            st.rerun()
 
     st.divider()
     st.subheader("Statements")
 
-    statements = get_statements_list(db)
+    try:
+        statements = api_client.list_statements()
+    except ApiError as exc:
+        st.error(str(exc))
+        st.stop()
+
     if statements:
         for s in statements:
             label = f"{s['statement_month']:02d}/{s['statement_year']}"
@@ -108,24 +124,21 @@ with st.sidebar:
         st.caption("No statements imported yet.")
 
 # ---------------------------------------------------------------------------
-# Main area header
+# Main area — header and stat cards
 # ---------------------------------------------------------------------------
 
 st.header(f"{settings.APP_NAME} — {month:02d}/{year}")
 
-summary = get_summary(db, month, year)
+summary = api_client.get_summary(month, year)
 total_spent = sum(r["total_spent"] for r in summary if r["type"] == "expense")
-top_cat = max((r for r in summary if r["type"] == "expense"), key=lambda r: r["total_spent"], default=None)
-
-from db.queries import get_bank_fees, get_income  # noqa: E402 — inline to keep imports grouped
-
-fees_rows = get_bank_fees(db, year)
+top_cat = max(
+    (r for r in summary if r["type"] == "expense"),
+    key=lambda r: r["total_spent"],
+    default=None,
+)
+fees_rows = api_client.get_bank_fees(year)
 fees_this_month = next((r["total_spent"] for r in fees_rows if r["month"] == month), 0.0)
-income_data = get_income(db, month, year)
-
-# ---------------------------------------------------------------------------
-# Stat cards
-# ---------------------------------------------------------------------------
+income_data = api_client.get_income(month, year)
 
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("Total Spent", f"R{total_spent:,.2f}")
@@ -139,13 +152,15 @@ st.divider()
 # Charts
 # ---------------------------------------------------------------------------
 
+trend_data = api_client.get_trend()
+
 ch1, ch2, ch3 = st.columns(3)
 with ch1:
-    st.plotly_chart(spend_by_category_bar(db, month, year), use_container_width=True)
+    st.plotly_chart(spend_by_category_bar(summary, month, year), use_container_width=True)
 with ch2:
-    st.plotly_chart(category_donut(db, month, year), use_container_width=True)
+    st.plotly_chart(category_donut(summary, month, year), use_container_width=True)
 with ch3:
-    st.plotly_chart(monthly_trend(db), use_container_width=True)
+    st.plotly_chart(monthly_trend(trend_data), use_container_width=True)
 
 st.divider()
 
@@ -153,14 +168,14 @@ st.divider()
 # Needs-review expander
 # ---------------------------------------------------------------------------
 
-flagged = get_transactions_needing_review(db)
+flagged = api_client.get_review_queue()
 label = f"Transactions Needing Review ({len(flagged)})"
 
 with st.expander(label, expanded=bool(flagged)):
     if not flagged:
         st.caption("All transactions have been reviewed.")
     else:
-        categories = get_categories(db)
+        categories = api_client.list_categories()
         cat_options = {c["name"]: c["id"] for c in categories}
 
         for tx in flagged:
@@ -171,8 +186,7 @@ with st.expander(label, expanded=bool(flagged)):
             cols[3].write(f"{(tx['llm_confidence'] or 0):.0%}")
 
             if cols[4].button("Confirm", key=f"confirm_{tx['id']}"):
-                confirm_transaction(db, tx["id"])
-                db.commit()
+                api_client.confirm_transaction(tx["id"])
                 st.rerun()
 
             new_cat = st.selectbox(
@@ -183,8 +197,7 @@ with st.expander(label, expanded=bool(flagged)):
                 label_visibility="collapsed",
             )
             if st.button("Apply", key=f"apply_{tx['id']}"):
-                update_transaction_category(db, tx["id"], cat_options[new_cat])
-                db.commit()
+                api_client.update_category(tx["id"], cat_options[new_cat])
                 st.rerun()
 
 st.divider()
@@ -193,4 +206,4 @@ st.divider()
 # Chat panel
 # ---------------------------------------------------------------------------
 
-render(db, month, year)
+render(month, year)

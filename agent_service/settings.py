@@ -1,10 +1,15 @@
 import logging
+import os
 from urllib.parse import quote_plus
 
 from pydantic import Field, computed_field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)-7s %(name)s | %(message)s",
+    datefmt="%H:%M:%S",
+)
 logger = logging.getLogger(__name__)
 
 
@@ -25,14 +30,27 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
 
     # --- Google Gemini ---
+    # One model PER ROLE. The free tier's request quota is per model, so giving
+    # each role its own model triples the usable daily budget. All three
+    # defaults are vision-capable and verified working on a free-tier key.
     GOOGLE_API_KEY: str = Field(..., description="API key for Google Gemini")
-    FLASH_MODEL: str = Field(
-        "gemini-1.5-flash",
-        description="Fast model — parsing and categorization",
+    PARSE_MODEL: str = Field(
+        "gemini-3.5-flash-lite",
+        description="Vision model — statement image to transactions",
     )
-    PRO_MODEL: str = Field(
-        "gemini-1.5-pro",
-        description="Smart model — chat tool calling and NL to SQL",
+    CATEGORIZE_MODEL: str = Field(
+        "gemini-3.1-flash-lite",
+        description="Classification model — transaction descriptions to categories",
+    )
+    CHAT_MODEL: str = Field(
+        "gemini-3.6-flash",
+        description="Chat model — tool calling and NL to SQL; upgrade to a pro model on paid quota",
+    )
+
+    # --- Chat memory ---
+    CHAT_HISTORY_MAX_TURNS: int = Field(
+        20,
+        description="Chat turns kept per session before history is reset",
     )
 
     # --- Database (MySQL) ---
@@ -41,6 +59,26 @@ class Settings(BaseSettings):
     DB_HOST: str = Field("localhost", description="MySQL host")
     DB_PORT: int = Field(3306, description="MySQL port")
     DB_NAME: str = Field(..., description="MySQL database name")
+
+    # --- LLM reliability ---
+    LLM_MAX_ATTEMPTS: int = Field(
+        3,
+        description="Attempts per Gemini call before giving up (transient errors only)",
+    )
+    LLM_RETRY_BASE_DELAY: float = Field(
+        2.0,
+        description="Base seconds for exponential backoff between retries",
+    )
+    LLM_MAX_RETRY_DELAY: float = Field(
+        30.0,
+        description="Cap on any single retry wait",
+    )
+
+    # --- Statement parsing ---
+    STATEMENT_MAX_PAGES: int = Field(
+        10,
+        description="Maximum PDF pages sent to the vision model per statement",
+    )
 
     # --- Categorization ---
     LLM_CONFIDENCE_THRESHOLD: float = Field(
@@ -61,7 +99,7 @@ class Settings(BaseSettings):
     )
 
     @field_validator(
-        "GOOGLE_API_KEY", "FLASH_MODEL", "PRO_MODEL",
+        "GOOGLE_API_KEY", "PARSE_MODEL", "CATEGORIZE_MODEL", "CHAT_MODEL",
         "DB_USER", "DB_PASSWORD", "DB_HOST", "DB_NAME",
         mode="before",
     )
