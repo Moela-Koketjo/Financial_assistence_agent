@@ -91,9 +91,13 @@ def monthly_trend(trend_data: list[dict]) -> go.Figure:
     fig.update_layout(
         **_LAYOUT_DEFAULTS,
         title=f"Monthly Spending Trend — last {len(trend_data)} months",
-        barmode="group",
-        xaxis_title="Month",
+        # Stacked, not grouped: with ~10 categories, side-by-side bars are a
+        # forest of thin slivers. Stacking makes each month's TOTAL readable at
+        # a glance — which is what "trend" means — while keeping the breakdown.
+        barmode="stack",
+        # No x-axis title: the tick labels already read "02/2026", and the
+        # title collided with the legend sitting underneath.
         yaxis_title="Amount (R)",
-        legend=dict(orientation="h", yanchor="bottom", y=-0.35),
+        legend=dict(orientation="h", yanchor="top", y=-0.15, font=dict(size=10)),
     )
     return fig

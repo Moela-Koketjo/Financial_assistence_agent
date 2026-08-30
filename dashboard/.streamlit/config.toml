@@ -1,0 +1,7 @@
+[client]
+# This app runs locally or in Docker — Streamlit Cloud's "Deploy" button is
+# noise here, and it clutters screenshots.
+toolbarMode = "minimal"
+
+[browser]
+gatherUsageStats = false

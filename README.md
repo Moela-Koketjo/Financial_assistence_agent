@@ -12,8 +12,11 @@ makes the follow-up work.
 Built as **two independently deployable services** that communicate only over
 HTTP.
 
-![Dashboard showing spending charts and the agent answering a month-over-month
-comparison question](docs/dashboard.png)
+![Dashboard showing category breakdown, monthly trend, and the agent answering a
+month-over-month spending question](docs/dashboard.png)
+
+<sub>Dashboard showing the category breakdown and monthly trend, generated from
+the synthetic sample statement in `samples/` — not real bank data.</sub>
 
 ---
 
