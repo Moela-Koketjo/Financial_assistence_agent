@@ -206,7 +206,17 @@ def ask(db: Session, chat, question: str, month: int, year: int, trace_id: str =
     started = time.monotonic()
     logger.info("%s Q: %r (context %02d/%d)", trace, question[:120], month, year)
 
-    message = f"[dashboard context: month={month}, year={year}]\n{question}"
+    # This prefix sits right next to the question, so it outweighs the system
+    # prompt when the two disagree. It previously read "month=3, year=2026",
+    # which the model took to mean "this month is March" — even in August.
+    # State today first, and label the dashboard month as a view, not a date.
+    message = (
+        f"[Today is {date.today():%d %B %Y}. "
+        f"The dashboard is displaying {month:02d}/{year} — that is the view "
+        f'the user is looking at, NOT the meaning of "this month".]'
+        + chr(10)
+        + question
+    )
     response = call_with_retry(lambda: chat.send_message(message), what="chat send")
 
     rounds = 0

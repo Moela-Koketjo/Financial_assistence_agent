@@ -15,12 +15,19 @@ services:
   agent:
     build: ./agent_service
     environment:
-      GOOGLE_API_KEY: ${GOOGLE_API_KEY:?set GOOGLE_API_KEY in .env}
-      DB_USER: root
-      DB_PASSWORD: ${DB_PASSWORD:-finance123}
-      DB_HOST: mysql
-      DB_PORT: 3306
-      DB_NAME: ${DB_NAME:-finance_agent}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:?set GOOGLE_API_KEY in .env}
+      - DB_USER=root
+      - DB_PASSWORD=${DB_PASSWORD:-finance123}
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_NAME=${DB_NAME:-finance_agent}
+      # Optional overrides, passed through only when set in .env — otherwise the
+      # defaults in agent_service/settings.py apply. Lets you switch models
+      # (e.g. when one model's daily quota is spent) without a rebuild.
+      - PARSE_MODEL
+      - CATEGORIZE_MODEL
+      - CHAT_MODEL
+      - LOG_LEVEL
     ports:
       - "8000:8000"
     depends_on:
