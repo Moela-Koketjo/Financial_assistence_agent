@@ -26,3 +26,10 @@ dev = [
 
 [tool.uv]
 package = false
+
+[tool.pytest.ini_options]
+# Put the service root on sys.path so tests import db/, agent/, api/ the same
+# way the application does.
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-q"
