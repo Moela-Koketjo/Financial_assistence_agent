@@ -12,6 +12,9 @@ makes the follow-up work.
 Built as **two independently deployable services** that communicate only over
 HTTP.
 
+![Dashboard showing spending charts and the agent answering a month-over-month
+comparison question](docs/dashboard.png)
+
 ---
 
 ## Architecture
@@ -56,8 +59,10 @@ the connection open, and the API keeps serving chat and dashboard traffic while
 the import runs. The client polls `GET /jobs/{id}` until the job reports `done`
 or `failed`, so the UI can show real progress instead of a frozen spinner.
 
-The work itself: page one is rendered to an image and passed to Gemini with a
-structured-extraction prompt that returns a JSON array of transactions. The
+The work itself: every page is rendered to an image (up to a configurable cap)
+and passed to Gemini with a structured-extraction prompt that returns a JSON
+array of transactions — a real statement runs to several pages, and reading
+only the first would silently drop most of the month. The
 statement's month is inferred from the *transaction dates themselves* (the
 modal month), not from today's date, so importing an old statement files it
 correctly. Statements are unique per month, so re-submitting one fails as a
