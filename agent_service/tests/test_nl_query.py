@@ -28,6 +28,18 @@ def test_rejects_anything_that_is_not_a_plain_select(sql):
     assert _validate(sql) is False
 
 
+@pytest.mark.parametrize("sql", [
+    "SELECT 'Weather information is not available in this database' AS weather",
+    "SELECT 1",
+    "SELECT 'hello' AS greeting LIMIT 100",
+])
+def test_rejects_queries_that_read_no_table(sql):
+    """Asked about the weather, the model wrote a SELECT of a literal apology,
+    ran it against MySQL, and spent a third API call phrasing the result.
+    A query with no FROM cannot answer anything about the user's finances."""
+    assert _validate(sql) is False
+
+
 def test_limit_is_forced_when_absent():
     assert "LIMIT" in _ensure_limit("SELECT * FROM transaction")
 

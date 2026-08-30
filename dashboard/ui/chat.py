@@ -9,6 +9,14 @@ from ui import api_client
 
 logger = logging.getLogger(__name__)
 
+# Shown as buttons before the first message — they teach the question format,
+# which is what new users get wrong.
+_STARTERS = [
+    "What did I spend most on?",
+    "How much did I earn?",
+    "What are my bank fees costing me?",
+]
+
 
 def render(month: int, year: int) -> None:
     """Render the chat panel — message history, input box, and response loop."""
@@ -21,7 +29,18 @@ def render(month: int, year: int) -> None:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    question = st.chat_input("Ask anything about your spending...")
+    # Starter questions, shown only before the first message. Users otherwise
+    # have to type "hi" to discover what the agent can do — which costs an API
+    # call to answer something the UI can show for free.
+    picked = None
+    if not st.session_state.messages:
+        st.caption(f"Ask about your statements — showing {month:02d}/{year}. For example:")
+        cols = st.columns(len(_STARTERS))
+        for col, starter in zip(cols, _STARTERS):
+            if col.button(starter, use_container_width=True):
+                picked = starter
+
+    question = st.chat_input("Ask anything about your spending...") or picked
 
     if question:
         st.session_state.messages.append({"role": "user", "content": question})

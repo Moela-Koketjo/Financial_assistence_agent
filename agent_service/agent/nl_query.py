@@ -50,6 +50,12 @@ def _validate(sql: str) -> bool:
     # rather than sanitised, because sanitising generated SQL is a losing game.
     if not upper.lstrip().startswith("SELECT"):
         return False
+    # Must read a table. Asked "what is the weather today?", the model produced
+    # SELECT 'Weather information is not available' AS weather — valid SQL that
+    # touches no data, executed against MySQL, then phrased by a third API call.
+    # A query with no FROM cannot answer anything about the user's finances.
+    if " FROM " not in f" {upper} ":
+        return False
     for keyword in _DANGEROUS:
         if keyword in upper:
             return False
