@@ -37,7 +37,7 @@ def render(month: int, year: int) -> None:
         st.caption(f"Ask about your statements — showing {month:02d}/{year}. For example:")
         cols = st.columns(len(_STARTERS))
         for col, starter in zip(cols, _STARTERS):
-            if col.button(starter, use_container_width=True):
+            if col.button(starter, width="stretch"):
                 picked = starter
 
     question = st.chat_input("Ask anything about your spending...") or picked

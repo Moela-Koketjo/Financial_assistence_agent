@@ -116,7 +116,7 @@ with st.sidebar:
     if statements:
         for s in statements:
             label = f"{s['statement_month']:02d}/{s['statement_year']}"
-            if st.button(label, key=f"stmt_{s['id']}", use_container_width=True):
+            if st.button(label, key=f"stmt_{s['id']}", width="stretch"):
                 st.session_state.selected_month = s["statement_month"]
                 st.session_state.selected_year = s["statement_year"]
                 st.rerun()
@@ -156,11 +156,11 @@ trend_data = api_client.get_trend()
 
 ch1, ch2, ch3 = st.columns(3)
 with ch1:
-    st.plotly_chart(spend_by_category_bar(summary, month, year), use_container_width=True)
+    st.plotly_chart(spend_by_category_bar(summary, month, year), width="stretch")
 with ch2:
-    st.plotly_chart(category_donut(summary, month, year), use_container_width=True)
+    st.plotly_chart(category_donut(summary, month, year), width="stretch")
 with ch3:
-    st.plotly_chart(monthly_trend(trend_data), use_container_width=True)
+    st.plotly_chart(monthly_trend(trend_data), width="stretch")
 
 st.divider()
 
