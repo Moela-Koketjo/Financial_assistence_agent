@@ -1,10 +1,12 @@
 """FastAPI app exposing the finance agent — statements, dashboard data, and chat."""
 
 import logging
-from collections.abc import Generator
+from collections.abc import AsyncIterator, Generator
+from contextlib import asynccontextmanager
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, UploadFile
 from pydantic import BaseModel
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from agent.llm import describe_error
@@ -16,7 +18,7 @@ from api.service import (
     import_statement,
     statement_period_of,
 )
-from db.database import SessionLocal
+from db.database import SessionLocal, engine
 from db.queries import (
     confirm_transaction,
     get_bank_fees,
@@ -33,7 +35,31 @@ from settings import settings
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title=settings.APP_NAME)
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    """Fail fast on boot if the database is unreachable.
+
+    Without this the service starts happily against a dead database and every
+    request fails later at query time, which reads as an application bug. In
+    Docker it also means the container exits instead of serving a broken API.
+    """
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception as exc:
+        logger.error(
+            "Cannot reach the database at %s:%s/%s — %s",
+            settings.DB_HOST, settings.DB_PORT, settings.DB_NAME, exc,
+        )
+        raise
+    logger.info(
+        "Database reachable at %s:%s/%s", settings.DB_HOST, settings.DB_PORT, settings.DB_NAME
+    )
+    yield
+
+
+app = FastAPI(title=settings.APP_NAME, lifespan=lifespan)
 
 _ALLOWED_EXTENSIONS = (".pdf", ".png", ".jpg", ".jpeg")
 
