@@ -11,8 +11,8 @@ contributor conventions and are not repeated here.
 
 ## 1. Architecture
 
-Two independently deployable services sharing no code. The only contract
-between them is HTTP.
+A frontend and a backend, packaged and deployed separately and sharing no
+code. The only contract between them is HTTP.
 
 ```
                     ┌──────────────────────────────┐
@@ -34,10 +34,11 @@ between them is HTTP.
                     └──────────────┘  └──────────┘
 ```
 
-**Why two services.** It puts a hard boundary around credentials (SPEC §1,
-NFR-11). The dashboard cannot reach the database or the model even by mistake,
-because it has neither the credentials nor the client libraries. Duplicating a
-little code across the boundary is the accepted cost.
+**Why split them.** Not for independent scaling — there is one backend and one
+user. It is to put a hard boundary around credentials (SPEC §1, NFR-11): the
+frontend cannot reach the database or the model even by mistake, because it has
+neither the credentials nor the client libraries installed. Duplicating a little
+code across the boundary is the accepted cost.
 
 **Why no CORS.** The browser only ever talks to the dashboard. The dashboard's
 *server* calls the agent service, so no cross-origin request is ever made.

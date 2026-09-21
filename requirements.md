@@ -183,8 +183,8 @@ the number either way.*
 - **C-1** The LLM is Google Gemini, accessed via the `google-genai` SDK.
 - **C-2** The database is MySQL. (Tests use in-memory SQLite — the single
   documented exception.)
-- **C-3** Two independently deployable services that share no code and
-  communicate only over HTTP.
+- **C-3** A frontend and a backend, packaged and deployed separately, sharing
+  no code and communicating only over HTTP.
 - **C-4** The LLM is stateless; conversation memory is the caller's
   responsibility.
 - **C-5** Free-tier LLM quota is enforced per project **per model**.

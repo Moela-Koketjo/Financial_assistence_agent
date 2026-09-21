@@ -16,10 +16,11 @@ The system ingests South African bank statements, categorises the transactions,
 stores them, and answers natural-language questions about them. It presents the
 same data visually.
 
-It is a two-service system. The **agent service** owns all data, all credentials,
-and all model access. The **dashboard** is a client that renders what the agent
-service returns and holds no credentials of its own. The only contract between
-them is the HTTP API in §8.
+It has two parts. The **agent service** is the backend: it owns all data, all
+credentials, and all model access. The **dashboard** is the frontend: it renders
+what the backend returns and holds no credentials of its own. They are packaged
+and deployed separately, and the only contract between them is the HTTP API in
+§8.
 
 There is no authentication. Every request is treated as coming from the single
 account holder (`requirements.md` A-1). No behaviour in this document is

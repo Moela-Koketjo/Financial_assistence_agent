@@ -9,8 +9,9 @@ and lets you ask follow-up questions in natural language — "How much did I spe
 on groceries?", then "and the month before?" — with conversation memory that
 makes the follow-up work.
 
-Built as **two independently deployable services** that communicate only over
-HTTP.
+A **Streamlit frontend and a FastAPI backend**, deployed as separate
+containers that communicate only over HTTP. The frontend holds no database or
+model credentials — it has neither the keys nor the client libraries.
 
 ![Dashboard showing category breakdown, monthly trend, and the agent answering a
 month-over-month spending question](docs/dashboard.png)
@@ -216,8 +217,10 @@ confirm the governing instruction is present, not that the model obeys it.
 - **Stateful chat, stateless data path** — chat memory lives in process, which
   means the agent service currently expects session affinity. Moving that store
   to Redis is the change required to scale it horizontally.
-- **Duplication over coupling** — the two services share no code. That is a
-  deliberate trade: a little repetition buys genuinely independent deploys.
+- **A credential boundary, not just a convention.** The frontend cannot reach
+  MySQL or Gemini because the drivers are not installed in it — a rule someone
+  could break is replaced by a capability that is absent. The cost is that the
+  two halves share no code, so a little is duplicated.
 - **Traceable without leaking.** Every model call is instrumented at a single
   gateway, so token usage, latency, and retries are measurable per request —
   the quantities the cost design actually constrains. Amounts and transaction
