@@ -6,11 +6,14 @@ misconfigured, or the collector is unreachable: failures are swallowed and the
 caller proceeds. An observability fault must never surface as an application
 fault.
 
-Trace data is sent to a self-hosted collector only (NFR-20) — prompts and
-results carry transaction descriptions and amounts.
+Financial detail is redacted before anything leaves the process (NFR-20).
+Prompts and results carry transaction descriptions and monetary amounts; what
+is transmitted is structure, timing, token usage, and which queries ran — which
+is all that measuring cost ever required.
 """
 
 import logging
+import re
 from contextlib import contextmanager
 from typing import Any, Iterator, Optional
 
@@ -19,6 +22,55 @@ from settings import settings
 logger = logging.getLogger(__name__)
 
 _client: Optional[Any] = None
+
+# Anything that looks like money, in any of the forms this system produces:
+# "R5,128.69", "R 5128.69", a bare 5128.69, or "5,128.69".
+_MONEY = re.compile(r"(?:R\s?)?\d{1,3}(?:[,\s]\d{3})*(?:\.\d{2})|(?:R\s?)\d+(?:\.\d+)?")
+
+# Description fields are merchant names verbatim — always removed, never parsed.
+_DESCRIPTION_KEYS = {
+    "raw_description", "description", "merchant", "raw_name", "clean_name",
+    "input", "output", "contents", "text", "answer", "question", "message",
+    "note", "reasoning",
+}
+
+_REDACTED = "[redacted]"
+
+
+def redact(*, data: Any, **_: Any) -> Any:
+    """Remove financial detail before a trace is transmitted.
+
+    Fails closed: anything that cannot be handled is replaced rather than sent.
+    Retains structure, counts, periods, categories, and model names — the
+    quantities bounded cost is measured in.
+    """
+    try:
+        return _redact(data)
+    except Exception:
+        logger.debug("Redaction failed; dropping value", exc_info=True)
+        return _REDACTED
+
+
+def _redact(value: Any, depth: int = 0) -> Any:
+    """Recursively strip amounts and free text from a value."""
+    if depth > 12:
+        return _REDACTED
+    if isinstance(value, str):
+        return _MONEY.sub(_REDACTED, value)
+    if isinstance(value, bool) or value is None:
+        return value
+    if isinstance(value, (int,)):
+        return value          # counts, months, years, ids
+    if isinstance(value, float):
+        return _REDACTED      # every float in this system is money
+    if isinstance(value, dict):
+        return {
+            k: (_REDACTED if k in _DESCRIPTION_KEYS else _redact(v, depth + 1))
+            for k, v in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_redact(v, depth + 1) for v in value]
+    return _REDACTED          # unknown type — do not risk it
 
 
 def _get_client() -> Optional[Any]:
@@ -34,6 +86,7 @@ def _get_client() -> Optional[Any]:
                 public_key=settings.LANGFUSE_PUBLIC_KEY,
                 secret_key=settings.LANGFUSE_SECRET_KEY,
                 host=settings.LANGFUSE_HOST,
+                mask=redact,
             )
             logger.info("Tracing enabled — sending to %s", settings.LANGFUSE_HOST)
         except Exception:

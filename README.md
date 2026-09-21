@@ -195,6 +195,12 @@ pdf2image + Pillow, pydantic-settings
   to Redis is the change required to scale it horizontally.
 - **Duplication over coupling** — the two services share no code. That is a
   deliberate trade: a little repetition buys genuinely independent deploys.
+- **Traceable without leaking.** Every model call is instrumented at a single
+  gateway, so token usage, latency, and retries are measurable per request —
+  the quantities the cost design actually constrains. Amounts and transaction
+  descriptions are redacted before any trace leaves the process, so
+  observability never becomes a data-export path. Tracing is off unless
+  configured.
 - **A model per role.** Parsing, categorising, and chat each point at their own
   Gemini model. They have genuinely different needs — vision, cheap bulk
   classification, tool calling — and since free-tier request quota is enforced
