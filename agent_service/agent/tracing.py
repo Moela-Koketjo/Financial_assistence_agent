@@ -102,16 +102,30 @@ def observe(name: str, as_type: str = "span", **fields: Any) -> Iterator[Optiona
 
     Swallows every tracing error: the caller's work must complete regardless.
     """
+    cm = None
+    obs = None
     client = _get_client()
-    if client is None:
-        yield None
-        return
+    if client is not None:
+        try:
+            cm = client.start_as_current_observation(name=name, as_type=as_type, **fields)
+            obs = cm.__enter__()
+        except Exception:
+            logger.debug("Tracing failed to start %r; continuing", name, exc_info=True)
+            cm = obs = None
+
+    # The observation is entered and exited around the yield rather than with a
+    # `with` block, because a generator-based context manager may yield only
+    # once. Catching the caller's exception here and yielding again raises
+    # "generator didn't stop after throw()" and REPLACES the caller's exception
+    # — which silently broke the daily-quota and unknown-model paths.
     try:
-        with client.start_as_current_observation(name=name, as_type=as_type, **fields) as obs:
-            yield obs
-    except Exception:
-        logger.debug("Tracing failed for %r; continuing", name, exc_info=True)
-        yield None
+        yield obs
+    finally:
+        if cm is not None:
+            try:
+                cm.__exit__(None, None, None)
+            except Exception:
+                logger.debug("Tracing failed to close %r", name, exc_info=True)
 
 
 def update(observation: Optional[Any], **fields: Any) -> None:

@@ -190,3 +190,80 @@ def test_client_is_constructed_with_the_mask(monkeypatch):
     with patch("langfuse.Langfuse") as ctor:
         tracing._get_client()
     assert ctor.call_args.kwargs["mask"] is tracing.redact
+
+
+# --- the context manager must never alter the caller's control flow ---------
+
+
+def _enabled(monkeypatch):
+    monkeypatch.setattr(tracing.settings, "LANGFUSE_PUBLIC_KEY", "pk")
+    monkeypatch.setattr(tracing.settings, "LANGFUSE_SECRET_KEY", "sk")
+
+
+def test_exception_inside_a_traced_block_propagates_unchanged(monkeypatch):
+    """A generator context manager may yield only once.
+
+    Catching the caller's exception and yielding again raised
+    "generator didn't stop after throw()" and replaced the original exception,
+    which broke the daily-quota and unknown-model paths where an error must
+    reach the caller intact.
+    """
+    _enabled(monkeypatch)
+
+    class Recording:
+        def start_as_current_observation(self, **_):
+            class CM:
+                def __enter__(self): return "obs"
+                def __exit__(self, *a): return False
+            return CM()
+
+    tracing._client = Recording()
+    sentinel = ValueError("caller's own error")
+    with pytest.raises(ValueError) as caught:
+        with tracing.observe("q"):
+            raise sentinel
+    assert caught.value is sentinel
+
+
+def test_exception_propagates_when_tracing_is_off(monkeypatch):
+    monkeypatch.setattr(tracing.settings, "LANGFUSE_PUBLIC_KEY", "")
+    sentinel = KeyError("boom")
+    with pytest.raises(KeyError) as caught:
+        with tracing.observe("q"):
+            raise sentinel
+    assert caught.value is sentinel
+
+
+def test_a_failing_exit_does_not_mask_success(monkeypatch):
+    """If closing the observation throws, the block still completes."""
+    _enabled(monkeypatch)
+
+    class BadExit:
+        def start_as_current_observation(self, **_):
+            class CM:
+                def __enter__(self): return "obs"
+                def __exit__(self, *a): raise RuntimeError("exporter died on close")
+            return CM()
+
+    tracing._client = BadExit()
+    with tracing.observe("q") as obs:
+        assert obs == "obs"
+
+
+def test_a_failing_exit_does_not_mask_the_callers_error(monkeypatch):
+    """A tracing failure must never replace the exception the caller raised."""
+    _enabled(monkeypatch)
+
+    class BadExit:
+        def start_as_current_observation(self, **_):
+            class CM:
+                def __enter__(self): return "obs"
+                def __exit__(self, *a): raise RuntimeError("exporter died on close")
+            return CM()
+
+    tracing._client = BadExit()
+    sentinel = ValueError("the real problem")
+    with pytest.raises(ValueError) as caught:
+        with tracing.observe("q"):
+            raise sentinel
+    assert caught.value is sentinel

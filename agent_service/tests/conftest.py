@@ -19,6 +19,11 @@ os.environ.setdefault("DB_USER", "test")
 os.environ.setdefault("DB_PASSWORD", "test")
 os.environ.setdefault("DB_NAME", "test")
 
+# Force tracing OFF regardless of any .env present. A test run must never
+# depend on ambient configuration, and must never transmit anything.
+os.environ["LANGFUSE_PUBLIC_KEY"] = ""
+os.environ["LANGFUSE_SECRET_KEY"] = ""
+
 import pytest  # noqa: E402
 from sqlalchemy import create_engine  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
