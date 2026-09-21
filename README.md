@@ -129,10 +129,11 @@ uv sync --directory agent_service
 uv run --directory agent_service pytest
 ```
 
-62 tests, under a second. They cover the categorisation waterfall (including
-word-boundary matching and keyword-priority collisions), the NL→SQL validator,
-statement period inference, Rand formatting, the missing-data contract, the
-Gemini retry policy, and the background job store.
+101 tests, under two seconds. They cover the categorisation waterfall
+(including word-boundary matching and keyword-priority collisions), the NL→SQL
+validator, statement period inference, Rand formatting, the missing-data
+contract, the Gemini retry policy, the background job store, and the redaction
+that keeps financial detail out of traces.
 
 ### Local development
 
@@ -172,7 +173,7 @@ uv run --directory dashboard streamlit run app.py             # second terminal
 ## Stack
 
 **Agent service** — FastAPI, Google Gemini (`google-genai`), SQLAlchemy, MySQL,
-pdf2image + Pillow, pydantic-settings
+pypdfium2 + Pillow, Langfuse, pydantic-settings
 
 **Dashboard** — Streamlit, Plotly, httpx
 
