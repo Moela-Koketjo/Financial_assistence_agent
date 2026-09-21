@@ -4,7 +4,7 @@ An AI agent that reads South African bank statements and answers questions about
 your spending in plain English.
 
 Upload a statement (PDF or photo) and the agent extracts every transaction with
-a vision model, categorises it through a three-tier pipeline, stores it in MySQL,
+a vision model, categorises it through a four-tier pipeline, stores it in MySQL,
 and lets you ask follow-up questions in natural language — "How much did I spend
 on groceries?", then "and the month before?" — with conversation memory that
 makes the follow-up work.
@@ -129,7 +129,7 @@ uv sync --directory agent_service
 uv run --directory agent_service pytest
 ```
 
-101 tests, under two seconds. They cover the categorisation waterfall
+105 tests, under two seconds. They cover the categorisation waterfall
 (including word-boundary matching and keyword-priority collisions), the NL→SQL
 validator, statement period inference, Rand formatting, the missing-data
 contract, the Gemini retry policy, the background job store, and the redaction
@@ -178,6 +178,28 @@ pypdfium2 + Pillow, Langfuse, pydantic-settings
 **Dashboard** — Streamlit, Plotly, httpx
 
 **Infrastructure** — Docker Compose, uv
+
+---
+
+## Specification
+
+The system is specified rather than only described. Each document has one job,
+and they trace into each other:
+
+| Document | Answers |
+|---|---|
+| [requirements.md](requirements.md) | Why it exists — goals, constraints, and 28 acceptance criteria |
+| [SPEC.md](SPEC.md) | What it must do — business rules, behaviour, the interface contract, edge cases |
+| [design.md](design.md) | How it is built — architecture, data model, failure handling, scaling limits |
+| [plan.md](plan.md) · [tasks.md](tasks.md) | What remains, phased and broken into tasks |
+
+Every requirement is cited in the specification and every acceptance criterion
+carried through, so any behaviour can be followed back to the requirement that
+motivated it and forward to the test that verifies it.
+
+`SPEC.md` §13 states which criteria are covered by automated tests, which were
+verified by hand, and which depend on model behaviour — where a test can only
+confirm the governing instruction is present, not that the model obeys it.
 
 ---
 
