@@ -19,12 +19,17 @@ plan exists so the remaining work is explicit rather than remembered.
 
 | | State |
 |---|---|
-| Acceptance criteria | 23 defined |
-| Verified by automated test | 11 |
+| Acceptance criteria | 28 defined |
+| Verified by automated test | 13 |
 | Verified by hand only | 7 |
+| Partially covered | 1 |
 | Rule-present only (model-dependent) | 4 |
+| Implemented but unasserted | 2 |
 | Structural, unasserted | 1 |
-| Test suite | 71 tests, no database, key, or network required |
+| Test suite | 105 tests, no database, key, or network required |
+
+Counts are derived from the verification column of `SPEC.md` §12; if they
+disagree with it, the specification is authoritative.
 
 The gap is concentrated in two places: **the import path has no end-to-end
 test**, and **model-dependent behaviour cannot be verified by asserting that an
