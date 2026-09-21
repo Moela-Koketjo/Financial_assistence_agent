@@ -13,6 +13,7 @@ is all that measuring cost ever required.
 """
 
 import logging
+import os
 import re
 from contextlib import contextmanager
 from typing import Any, Iterator, Optional
@@ -80,6 +81,14 @@ def _get_client() -> Optional[Any]:
         return None
     if _client is None:
         try:
+            # OpenTelemetry reads the service name from the environment; without
+            # it every trace is labelled "unknown_service", which is useless in
+            # a project holding traces from more than one application. Set from
+            # settings rather than hardcoded, and only if not already provided.
+            os.environ.setdefault(
+                "OTEL_SERVICE_NAME", settings.APP_NAME.lower().replace(" ", "-")
+            )
+
             from langfuse import Langfuse
 
             _client = Langfuse(
@@ -87,6 +96,7 @@ def _get_client() -> Optional[Any]:
                 secret_key=settings.LANGFUSE_SECRET_KEY,
                 host=settings.LANGFUSE_URL,
                 mask=redact,
+                environment="development" if settings.DEBUG else "production",
             )
             logger.info("Tracing enabled — sending to %s", settings.LANGFUSE_URL)
         except Exception:
