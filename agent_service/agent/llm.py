@@ -15,6 +15,7 @@ from typing import Callable, Optional, TypeVar
 from google import genai
 from google.genai import errors
 
+from agent import tracing
 from settings import settings
 
 logger = logging.getLogger(__name__)
@@ -69,11 +70,39 @@ def describe_error(exc: Exception) -> str:
     return f"{type(exc).__name__}: {text[:160]}"
 
 
-def call_with_retry(fn: Callable[[], T], *, what: str) -> T:
-    """Run a Gemini call, retrying transient failures with exponential backoff."""
+def _usage_of(response: object) -> dict:
+    """Extract token counts from a Gemini response, tolerating their absence."""
+    meta = getattr(response, "usage_metadata", None)
+    if meta is None:
+        return {}
+    counts = {
+        "input": getattr(meta, "prompt_token_count", None),
+        "output": getattr(meta, "candidates_token_count", None),
+        "total": getattr(meta, "total_token_count", None),
+    }
+    return {k: v for k, v in counts.items() if isinstance(v, int)}
+
+
+def call_with_retry(fn: Callable[[], T], *, what: str, model: str = "") -> T:
+    """Run a Gemini call, retrying transient failures with exponential backoff.
+
+    The whole call — including its retries — is one traced generation, so a
+    request that succeeded on the third attempt is visible as one unit of work
+    rather than three unrelated events.
+    """
+    with tracing.observe(what, as_type="generation", model=model or None) as obs:
+        result = _call_with_retry_inner(fn, what=what, obs=obs)
+        tracing.update(obs, usage_details=_usage_of(result))
+        return result
+
+
+def _call_with_retry_inner(fn: Callable[[], T], *, what: str, obs: object = None) -> T:
+    """Retry loop for one Gemini call."""
     attempts = max(1, settings.LLM_MAX_ATTEMPTS)
     for attempt in range(1, attempts + 1):
         try:
+            if attempt > 1:
+                tracing.update(obs, metadata={"attempts": attempt})
             return fn()
         except Exception as exc:
             code = _status_code(exc)
@@ -82,9 +111,11 @@ def call_with_retry(fn: Callable[[], T], *, what: str) -> T:
 
             if _is_daily_quota(exc):
                 logger.error("%s failed — %s (daily cap; not retrying)", what, describe_error(exc))
+                tracing.update(obs, level="ERROR", status_message=describe_error(exc))
                 raise
             if not (transient or network) or attempt == attempts:
                 logger.error("%s failed — %s", what, describe_error(exc))
+                tracing.update(obs, level="ERROR", status_message=describe_error(exc))
                 raise
 
             delay = _backoff_delay(attempt, _suggested_delay(exc))

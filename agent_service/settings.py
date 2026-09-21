@@ -47,6 +47,16 @@ class Settings(BaseSettings):
         description="Chat model — tool calling and NL to SQL; upgrade to a pro model on paid quota",
     )
 
+    # --- Tracing (Langfuse, self-hosted) ---
+    # Absent keys mean tracing is OFF. Observability must never be a
+    # precondition for the system working (SPEC 10.1).
+    LANGFUSE_PUBLIC_KEY: str = Field("", description="Langfuse public key; empty disables tracing")
+    LANGFUSE_SECRET_KEY: str = Field("", description="Langfuse secret key; empty disables tracing")
+    LANGFUSE_HOST: str = Field(
+        "http://localhost:3000",
+        description="Self-hosted Langfuse base URL — trace data must not leave the deployment",
+    )
+
     # --- Chat memory ---
     CHAT_HISTORY_MAX_TURNS: int = Field(
         20,
@@ -107,6 +117,12 @@ class Settings(BaseSettings):
     def strip_whitespace(cls, v: str) -> str:
         """Strip accidental whitespace from all string fields."""
         return v.strip() if isinstance(v, str) else v
+
+    @computed_field
+    @property
+    def TRACING_ENABLED(self) -> bool:
+        """True only when both Langfuse keys are configured."""
+        return bool(self.LANGFUSE_PUBLIC_KEY and self.LANGFUSE_SECRET_KEY)
 
     @computed_field
     @property

@@ -38,7 +38,7 @@ def parse(data: bytes, filename: str) -> list[dict]:
                 model=settings.PARSE_MODEL,
                 contents=[PARSE_STATEMENT_PROMPT, *images],
             ),
-            what=f"parse {filename}",
+            what=f"parse {filename}", model=settings.PARSE_MODEL,
         )
         text: str = (
             response.text

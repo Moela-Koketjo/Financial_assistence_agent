@@ -76,7 +76,7 @@ def _generate_sql(question: str, schema: str, categories: str) -> str:
     prompt = NL_TO_SQL_PROMPT.format(schema=schema, question=question, categories=categories)
     response = call_with_retry(
         lambda: client.models.generate_content(model=settings.CHAT_MODEL, contents=prompt),
-        what="nl->sql generate",
+        what="nl->sql generate", model=settings.CHAT_MODEL,
     )
     return _strip_fences(response.text)
 
@@ -107,7 +107,7 @@ def _plain_english(question: str, result: list[dict]) -> str:
     prompt = FORMAT_TOOL_RESULT_PROMPT.format(question=question, result=result)
     response = call_with_retry(
         lambda: client.models.generate_content(model=settings.CHAT_MODEL, contents=prompt),
-        what="nl->sql phrase answer",
+        what="nl->sql phrase answer", model=settings.CHAT_MODEL,
     )
     return response.text.strip()
 

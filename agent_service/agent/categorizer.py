@@ -94,7 +94,7 @@ def _llm_categorize(
                 model=settings.CATEGORIZE_MODEL,
                 contents=prompt,
             ),
-            what="categorize transaction",
+            what="categorize transaction", model=settings.CATEGORIZE_MODEL,
         )
         text = (
             response.text

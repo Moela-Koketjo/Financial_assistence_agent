@@ -217,12 +217,12 @@ def ask(db: Session, chat, question: str, month: int, year: int, trace_id: str =
         + chr(10)
         + question
     )
-    response = call_with_retry(lambda: chat.send_message(message), what="chat send")
+    response = call_with_retry(lambda: chat.send_message(message), what="chat send", model=settings.CHAT_MODEL)
 
     rounds = 0
     while response.function_calls and rounds < _MAX_TOOL_ROUNDS:
         parts = _resolve_function_calls(db, response.function_calls, trace)
-        response = call_with_retry(lambda: chat.send_message(parts), what="chat tool reply")
+        response = call_with_retry(lambda: chat.send_message(parts), what="chat tool reply", model=settings.CHAT_MODEL)
         rounds += 1
     if rounds == _MAX_TOOL_ROUNDS and response.function_calls:
         logger.warning("%s hit the %d-round tool limit", trace, _MAX_TOOL_ROUNDS)

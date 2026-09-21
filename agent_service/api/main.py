@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from agent import tracing
 from agent.llm import describe_error
 from agent.tools import ask
 from api import jobs, memory
@@ -57,6 +58,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         "Database reachable at %s:%s/%s", settings.DB_HOST, settings.DB_PORT, settings.DB_NAME
     )
     yield
+    tracing.flush()  # deliver anything still queued before the process exits
 
 
 app = FastAPI(title=settings.APP_NAME, lifespan=lifespan)
@@ -221,12 +223,23 @@ def chat(body: ChatRequest, db: Session = Depends(get_db_session)) -> dict:
     gemini_chat = memory.get_chat(
         body.session_id, body.month, body.year, periods, get_categories(db)
     )
-    try:
-        answer = ask(db, gemini_chat, body.message, body.month, body.year, body.session_id)
-    except Exception as exc:
-        logger.error("[%s] chat failed — %s", body.session_id[:8], describe_error(exc))
-        logger.debug("chat failure detail", exc_info=True)
-        raise HTTPException(status_code=502, detail=f"The agent could not answer: {describe_error(exc)}")
+    # One user action is one trace; the model calls made while answering nest
+    # beneath it, so the cost of this question is attributable to it (SPEC 10.1).
+    with tracing.observe(
+        "chat",
+        input=body.message,
+        metadata={"session": body.session_id[:8], "viewing": f"{body.month:02d}/{body.year}"},
+    ) as trace:
+        try:
+            answer = ask(db, gemini_chat, body.message, body.month, body.year, body.session_id)
+        except Exception as exc:
+            logger.error("[%s] chat failed — %s", body.session_id[:8], describe_error(exc))
+            logger.debug("chat failure detail", exc_info=True)
+            tracing.update(trace, level="ERROR", status_message=describe_error(exc))
+            raise HTTPException(
+                status_code=502, detail=f"The agent could not answer: {describe_error(exc)}"
+            )
+        tracing.update(trace, output=answer)
     return {"answer": answer}
 
 
