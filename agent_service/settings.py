@@ -52,10 +52,10 @@ class Settings(BaseSettings):
     # precondition for the system working (SPEC 10.1).
     LANGFUSE_PUBLIC_KEY: str = Field("", description="Langfuse public key; empty disables tracing")
     LANGFUSE_SECRET_KEY: str = Field("", description="Langfuse secret key; empty disables tracing")
-    LANGFUSE_HOST: str = Field(
-        "http://localhost:3000",
-        description="Self-hosted Langfuse base URL — trace data must not leave the deployment",
-    )
+    # Langfuse's own setup snippet emits LANGFUSE_BASE_URL; the SDK historically
+    # used LANGFUSE_HOST. Accept either so a pasted snippet just works.
+    LANGFUSE_HOST: str = Field("", description="Langfuse base URL")
+    LANGFUSE_BASE_URL: str = Field("", description="Alias for LANGFUSE_HOST")
 
     # --- Chat memory ---
     CHAT_HISTORY_MAX_TURNS: int = Field(
@@ -117,6 +117,12 @@ class Settings(BaseSettings):
     def strip_whitespace(cls, v: str) -> str:
         """Strip accidental whitespace from all string fields."""
         return v.strip() if isinstance(v, str) else v
+
+    @computed_field
+    @property
+    def LANGFUSE_URL(self) -> str:
+        """Resolved Langfuse endpoint, from either accepted variable name."""
+        return self.LANGFUSE_BASE_URL or self.LANGFUSE_HOST or "https://cloud.langfuse.com"
 
     @computed_field
     @property

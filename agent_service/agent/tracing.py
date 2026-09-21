@@ -85,10 +85,10 @@ def _get_client() -> Optional[Any]:
             _client = Langfuse(
                 public_key=settings.LANGFUSE_PUBLIC_KEY,
                 secret_key=settings.LANGFUSE_SECRET_KEY,
-                host=settings.LANGFUSE_HOST,
+                host=settings.LANGFUSE_URL,
                 mask=redact,
             )
-            logger.info("Tracing enabled — sending to %s", settings.LANGFUSE_HOST)
+            logger.info("Tracing enabled — sending to %s", settings.LANGFUSE_URL)
         except Exception:
             # Import or construction failed. Disable rather than fail the request.
             logger.warning("Tracing unavailable; continuing without it", exc_info=True)

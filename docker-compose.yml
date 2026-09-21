@@ -32,7 +32,8 @@ services:
       # The collector is not part of this stack — see tasks.md TASK-020.
       - LANGFUSE_PUBLIC_KEY
       - LANGFUSE_SECRET_KEY
-      - LANGFUSE_HOST=${LANGFUSE_HOST:-http://langfuse:3000}
+      - LANGFUSE_HOST
+      - LANGFUSE_BASE_URL
     ports:
       - "8000:8000"
     depends_on:
